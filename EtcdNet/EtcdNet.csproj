@@ -54,6 +54,7 @@
     <Compile Include="EtcdClientOpitions.cs" />
     <Compile Include="EtcdExceptions.cs" />
     <Compile Include="HttpClientEx.cs" />
+    <Compile Include="IEtcdClient.cs" />
     <Compile Include="IJsonDeserializer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

@@ -16,7 +16,7 @@ namespace EtcdNet
     /// <summary>
     /// The EtcdClient class is used to talk with etcd service
     /// </summary>
-    public class EtcdClient
+    public class EtcdClient : IEtcdClient
     {
 
         HttpClientEx _currentClient;
