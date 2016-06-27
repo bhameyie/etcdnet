@@ -22,6 +22,7 @@ namespace EtcdNet
         HttpClientEx _currentClient;
         readonly IJsonDeserializer _jsonDeserializer;
         long _lastIndex;
+        private TaskSupervisor _taskSupervisor;
 
         /// <summary>
         /// X-Etcd-Cluster-Id
@@ -57,19 +58,19 @@ namespace EtcdNet
                 handler.ClientCertificates.Add(options.X509Certificate);
 
             AuthenticationHeaderValue authenticationHeaderValue = null;
-            if( !string.IsNullOrWhiteSpace(options.Username) &&
-                !string.IsNullOrWhiteSpace(options.Password) )
+            if (!string.IsNullOrWhiteSpace(options.Username) &&
+                !string.IsNullOrWhiteSpace(options.Password))
             {
                 string auth = string.Format("{0}:{1}", options.Username, options.Password);
                 authenticationHeaderValue = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(ASCIIEncoding.ASCII.GetBytes(auth)));
             }
 
-            _jsonDeserializer = options.JsonDeserializer == null ? new DefaultJsonDeserializer() : options.JsonDeserializer;
+            _jsonDeserializer = options.JsonDeserializer ?? new DefaultJsonDeserializer();
 
             if (options.IgnoreCertificateError)
                 handler.ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => { return true; };
 
-            HttpClientEx [] httpClients = options.Urls.Select(u =>
+            HttpClientEx[] httpClients = options.Urls.Select(u =>
                 {
                     if (string.IsNullOrWhiteSpace(u))
                         throw new ArgumentNullException("`urls` array contains empty url");
@@ -81,9 +82,9 @@ namespace EtcdNet
                 }).ToArray();
 
             // make the clients as a ring, so that we can try the next one when one fails
-            if( httpClients.Length > 1 )
+            if (httpClients.Length > 1)
             {
-                for( int i = httpClients.Length - 2; i >= 0; i--)
+                for (int i = httpClients.Length - 2; i >= 0; i--)
                 {
                     httpClients[i].Next = httpClients[i + 1];
                 }
@@ -92,6 +93,8 @@ namespace EtcdNet
 
             // pick a client randomly
             _currentClient = httpClients[DateTime.UtcNow.Ticks % httpClients.Length];
+
+            _taskSupervisor = new TaskSupervisor();
         }
         #endregion
 
@@ -101,7 +104,7 @@ namespace EtcdNet
             HttpClientEx startClient = _currentClient;
             HttpClientEx currentClient = _currentClient;
 
-            for (; ;)
+            for (; ; )
             {
                 try
                 {
@@ -149,7 +152,7 @@ namespace EtcdNet
                             if (currentClient != startClient)
                                 Interlocked.CompareExchange(ref _currentClient, currentClient, startClient);
 
-                            if( !string.IsNullOrWhiteSpace(json) )
+                            if (!string.IsNullOrWhiteSpace(json))
                             {
                                 EtcdResponse resp = _jsonDeserializer.Deserialize<EtcdResponse>(json);
                                 resp.EtcdServer = currentClient.BaseAddress.OriginalString;
@@ -168,7 +171,7 @@ namespace EtcdNet
                         }
                     }
                 }
-                catch(EtcdRaftException)
+                catch (EtcdRaftException)
                 {
                     currentClient = currentClient.Next;
                     if (currentClient != startClient)
@@ -176,11 +179,11 @@ namespace EtcdNet
                     else
                         throw; // tried all clients, all failed
                 }
-                catch(EtcdGenericException)
+                catch (EtcdGenericException)
                 {
                     throw;
                 }
-                catch(Exception)
+                catch (Exception)
                 {
                     currentClient = currentClient.Next;
                     if (currentClient != startClient)
@@ -201,7 +204,7 @@ namespace EtcdNet
                 long longValue;
                 if (responseMessage.Headers.TryGetValues(name, out headerValues) && headerValues != null)
                 {
-                    foreach( string headerValue in headerValues )
+                    foreach (string headerValue in headerValues)
                     {
                         if (!string.IsNullOrWhiteSpace(headerValue) && long.TryParse(headerValue, out longValue))
                             return longValue;
@@ -251,16 +254,16 @@ namespace EtcdNet
 
             try
             {
-                string url = string.Format( CultureInfo.InvariantCulture
+                string url = string.Format(CultureInfo.InvariantCulture
                     , "/v2/keys{0}?recursive={1}&sorted={2}"
                     , key
                     , recursive.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()
                     , sorted.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()
                     );
-                EtcdResponse getNodeResponse = await SendRequest( HttpMethod.Get, url);
+                EtcdResponse getNodeResponse = await SendRequest(HttpMethod.Get, url);
                 return getNodeResponse;
             }
-            catch(EtcdCommonException.KeyNotFound)
+            catch (EtcdCommonException.KeyNotFound)
             {
                 if (ignoreKeyNotFoundException)
                     return null;
@@ -300,11 +303,11 @@ namespace EtcdNet
 
             string url = string.Format(CultureInfo.InvariantCulture, "/v2/keys{0}", key);
             List<KeyValuePair<string, string>> list = new List<KeyValuePair<string, string>>();
-            if( value != null)
+            if (value != null)
                 list.Add(new KeyValuePair<string, string>("value", value));
             if (ttl.HasValue)
                 list.Add(new KeyValuePair<string, string>("ttl", ttl.Value.ToString(CultureInfo.InvariantCulture)));
-            if( dir.HasValue)
+            if (dir.HasValue)
                 list.Add(new KeyValuePair<string, string>("dir", dir.Value.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()));
 
             return SendRequest(HttpMethod.Put, url, list);
@@ -332,7 +335,7 @@ namespace EtcdNet
             {
                 return await SendRequest(HttpMethod.Delete, url);
             }
-            catch(EtcdCommonException.KeyNotFound)
+            catch (EtcdCommonException.KeyNotFound)
             {
                 if (ignoreKeyNotFoundException)
                     return null;
@@ -509,24 +512,7 @@ namespace EtcdNet
         /// <returns>EtcdResponse</returns>
         public async Task<EtcdResponse> WatchNodeAsync(string key, bool recursive = false, long? waitIndex = null)
         {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("key");
-            if (!key.StartsWith("/"))
-                throw new ArgumentException("The value of `key` must start with `/`.");
-
-            string requestUri = string.Format(CultureInfo.InvariantCulture
-                , "/v2/keys{0}?wait=true&recursive={1}"
-                , key
-                , recursive.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()
-                );
-            if (waitIndex.HasValue)
-            {
-                requestUri = string.Format(CultureInfo.InvariantCulture
-                    , "{0}&waitIndex={1}"
-                    , requestUri
-                    , waitIndex.Value
-                    );
-            }
+            var requestUri = BuildRequestUri(key, recursive, waitIndex);
 
             for (; ; )
             {
@@ -548,7 +534,70 @@ namespace EtcdNet
                         throw;
                 }
             }
-            
+        }
+
+        private async Task<EtcdResponse> TolerantFetch(string requestUri)
+        {
+            try
+            {
+                EtcdResponse resp = await SendRequest(HttpMethod.Get, requestUri);
+                if (resp != null)
+                    return resp;
+            }
+            catch (TaskCanceledException)
+            {
+                // no changes detected and the connection idles for too long, try again
+            }
+            catch (EtcdCommonException.KeyNotFound) { }
+            catch (HttpRequestException hrex)
+            {
+                // server closed connection
+                WebException webException = hrex.InnerException as WebException;
+                if (webException == null || webException.Status != WebExceptionStatus.ConnectionClosed)
+                    throw;
+            }
+            return null;
+        }
+
+        public void SubscribeToNodeChanges(string key, Action<EtcdResponse> callBack, TimeSpan pollingInterval, bool recursive = false, long? waitIndex = null)
+        {
+            var requestUri = BuildRequestUri(key, recursive, waitIndex);
+            _taskSupervisor.Supervise(() =>
+            {
+                TolerantFetch(requestUri).ContinueWith((fetched) =>
+                {
+                    if (fetched.Result != null)
+                        callBack(fetched.Result);
+                });
+            },pollingInterval);
+        }
+
+        public void Dispose()
+        {
+            _taskSupervisor.Dispose();
+        }
+
+        private static string BuildRequestUri(string key, bool recursive, long? waitIndex)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentNullException("key");
+            if (!key.StartsWith("/"))
+                throw new ArgumentException("The value of `key` must start with `/`.");
+
+            string requestUri = string.Format(CultureInfo.InvariantCulture
+                , "/v2/keys{0}?wait=true&recursive={1}"
+                , key
+                , recursive.ToString(CultureInfo.InvariantCulture).ToLowerInvariant()
+                );
+            if (waitIndex.HasValue)
+            {
+                requestUri = string.Format(CultureInfo.InvariantCulture
+                    , "{0}&waitIndex={1}"
+                    , requestUri
+                    , waitIndex.Value
+                    );
+            }
+            return requestUri;
         }
     }
 }

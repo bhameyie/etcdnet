@@ -53,10 +53,12 @@
     <Compile Include="EtcdClient.cs" />
     <Compile Include="EtcdClientOpitions.cs" />
     <Compile Include="EtcdExceptions.cs" />
+    <Compile Include="Eventing.cs" />
     <Compile Include="HttpClientEx.cs" />
     <Compile Include="IEtcdClient.cs" />
     <Compile Include="IJsonDeserializer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="TaskSupervisor.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="EtcdNet.nuspec" />

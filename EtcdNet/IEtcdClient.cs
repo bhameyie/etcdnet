@@ -1,8 +1,9 @@
+using System;
 using System.Threading.Tasks;
 
 namespace EtcdNet
 {
-    public interface IEtcdClient
+    public interface IEtcdClient :IDisposable
     {
         /// <summary>
         /// X-Etcd-Cluster-Id
@@ -122,5 +123,15 @@ namespace EtcdNet
         /// <param name="waitIndex">Etcd Index is continue monitor from</param>
         /// <returns>EtcdResponse</returns>
         Task<EtcdResponse> WatchNodeAsync(string key, bool recursive = false, long? waitIndex = null);
+
+        /// <summary>
+        /// Subscribes to all event fired whenever a node's value has changed
+        /// </summary>
+        /// <param name="key"></param>
+        /// <param name="callBack"></param>
+        /// <param name="pollingInterval"></param>
+        /// <param name="recursive"></param>
+        /// <param name="waitIndex"></param>
+        void SubscribeToNodeChanges(string key, Action<EtcdResponse> callBack, TimeSpan pollingInterval, bool recursive = false, long? waitIndex = null);
     }
 }
